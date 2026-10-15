@@ -742,7 +742,7 @@ describe('ConnectionCoordinator', () => {
 
   it('preserves named Hermes profiles across connection rename, refresh and cached restart', async () => {
     const { store } = await createStoreHarness();
-    await store.update('alpha', { backendKind: 'hermes', label: 'My Hermes' });
+    await store.update('alpha', { backendKind: 'hermes', label: 'coder' });
     const storage = new MemoryDashboardStorage();
     const cache = new RosterCache({ storage, now: () => 50 });
     const coordinator = new ConnectionCoordinator({ store, cache,
@@ -755,7 +755,7 @@ describe('ConnectionCoordinator', () => {
     });
     const names = () => coordinator.getSnapshot().roster.find(group => group.connection.id === 'alpha')?.agents.map(row => row.agent.name);
     try {
-      await coordinator.start(); expect(names()).toEqual(['My Hermes', 'coder']);
+      await coordinator.start(); expect(names()).toEqual(['coder', 'coder']);
       await coordinator.renameConnection('alpha', 'Studio'); expect(names()).toEqual(['Studio', 'coder']);
       await coordinator.refreshRoster(); expect(names()).toEqual(['Studio', 'coder']);
       expect((await cache.get('alpha'))?.agents.map(row => row.name)).toEqual(['Studio', 'coder']);

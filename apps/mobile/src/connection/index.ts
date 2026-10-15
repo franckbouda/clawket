@@ -1033,7 +1033,7 @@ export class ConnectionCoordinator {
       this.rosterInputs.set(connection.id, {
         connection,
         agents: connectionAgentDefaultName(connection.backendKind)
-          ? (entry?.agents ?? current?.agents ?? EMPTY_AGENTS).map(agent => agent.isMain ? { ...agent, name: connection.label } : agent)
+          ? (entry?.agents ?? current?.agents ?? EMPTY_AGENTS).map(agent => ({ ...agent, name: connection.label }))
           : entry?.agents ?? current?.agents ?? EMPTY_AGENTS,
         sessions: entry?.sessions ?? current?.sessions ?? EMPTY_SESSIONS,
         source: 'cache',
@@ -1097,7 +1097,7 @@ export class ConnectionCoordinator {
           this.rosterInputs.set(entry.connectionId, {
             connection,
             agents: cloneAgents(connectionAgentDefaultName(connection.backendKind)
-              ? agents.map(agent => agent.isMain ? { ...agent, name: connection.label } : agent)
+              ? agents.map(agent => ({ ...agent, name: connection.label }))
               : agents),
             sessions: current?.sessions ?? EMPTY_SESSIONS,
             source: current?.source ?? 'cache',
@@ -1117,7 +1117,7 @@ export class ConnectionCoordinator {
       const connection = this.connectionDescriptor(entry.connectionId);
       if (!connection) return;
       const agents = connectionAgentDefaultName(connection.backendKind)
-        ? listedAgents.map(agent => agent.isMain ? { ...agent, name: connection.label } : agent)
+        ? listedAgents.map(agent => ({ ...agent, name: connection.label }))
         : listedAgents;
       const syncedAt = this.now();
       const acceptedSessions = entry.sessionSnapshotRevision === sessionSnapshotRevision
@@ -1147,7 +1147,7 @@ export class ConnectionCoordinator {
       this.rosterInputs.set(entry.connectionId, {
         connection: currentConnection,
         agents: connectionAgentDefaultName(currentConnection.backendKind)
-          ? cacheSnapshot.agents.map(agent => agent.isMain ? { ...agent, name: currentConnection.label } : agent)
+          ? cacheSnapshot.agents.map(agent => ({ ...agent, name: currentConnection.label }))
           : cacheSnapshot.agents,
         sessions: cacheSnapshot.sessions,
         source: 'live',
