@@ -11,6 +11,12 @@ describe('Hermes profile identities', () => {
     for (const key of ['main', 'hermes', 'agent:main:main', 'agent:coder:main']) expect(parseHermesProfileSessionKey(key)).toBeNull();
     expect(hermesAgentProfile('hermes')).toBeNull();
   });
+  it('validates the empty and oversized key boundaries while accepting the largest valid key', () => {
+    expect(() => hermesProfileSessionKey('coder', '')).toThrow();
+    expect(() => hermesProfileSessionKey('coder', 'x'.repeat(2049))).toThrow();
+    const key = 'x'.repeat(2048);
+    expect(parseHermesProfileSessionKey(hermesProfileSessionKey('coder', key))).toEqual({ profile: 'coder', key });
+  });
   it.each(['../coder', 'default', '', 'Coder', 'a'.repeat(65), 'coder:main'])('rejects profile %j', profile => expect(() => hermesProfileAgentId(profile)).toThrow());
-  it.each(['agent:hermes-profile.coder:', 'agent:hermes-profile.../work:main', 'agent:hermes-profile.default:main'])('rejects malformed reserved key %j', key => expect(() => parseHermesProfileSessionKey(key)).toThrow());
+  it.each(['agent:hermes-profile.coder:', 'agent:hermes-profile.../work:main', 'agent:hermes-profile.default:main', 'agent:hermes-profile.coder', `agent:hermes-profile.coder:${'x'.repeat(2201)}`])('rejects malformed reserved key %j', key => expect(() => parseHermesProfileSessionKey(key)).toThrow());
 });
