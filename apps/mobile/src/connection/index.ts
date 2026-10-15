@@ -529,7 +529,7 @@ export class ConnectionCoordinator {
       }
       if (!input || !input.agents.some((agent) => followsLabel || agent.name === previous)) return;
       const rename = (agents: ReadonlyArray<AgentDescriptor>) => agents.map((agent) => (
-        followsLabel || agent.name === previous ? { ...agent, name } : agent
+        agent.isMain && (followsLabel || agent.name === previous) ? { ...agent, name } : agent
       ));
       try {
         await this.cache.updateAgents(connectionId, rename);

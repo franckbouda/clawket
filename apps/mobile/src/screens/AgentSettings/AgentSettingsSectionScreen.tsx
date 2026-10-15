@@ -1,3 +1,4 @@
+import { scopeAgentAdapter } from '@clawket/agent-protocol';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ScrollView,
@@ -179,7 +180,8 @@ export function AgentSettingsSectionScreen({
     return navigation.addListener('focus', () => setSkillsRefresh((value) => value + 1));
   }, [discoveringSkills, editingCron, isDocumentRoute, navigation, section]);
   const routeIsActive = runtime.activeConnectionId === connectionId;
-  const adapter = routeIsActive && !permissionDenied ? runtime.activeAdapter : null;
+  const rawAdapter = routeIsActive && !permissionDenied ? runtime.activeAdapter : null;
+  const adapter = useMemo(() => scopeAgentAdapter(rawAdapter, agentId), [rawAdapter, agentId]);
   const connectionGroup = runtime.roster.find(
     (candidate) => candidate.connection.id === connectionId,
   );

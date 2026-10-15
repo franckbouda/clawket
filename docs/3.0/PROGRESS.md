@@ -1,5 +1,11 @@
 # PROGRESS · Clawket 3.0 进度日志
 
+- 2026-10-15 Hermes multi-profile support (explicit owner request; PR and merge requested).
+  - Named profiles become separate Agents inside one Hermes connection through additive `hermes.profiles.v1`, with qualified session keys and per-profile native homes, credentials, stores, run cleanup and management views. Default `hermes` / `main`, old Apps/Bridges and OpenClaw retain their contracts. Connection renames preserve profile names.
+  - The owner request supersedes the frozen single-Hermes-Agent/group assumption; model selection remains global within a native profile, never per session. No quota, version, native Hermes source, Relay/Registry or release change. Detailed boundaries and native API prerequisites: [Hermes profiles](../3.1/hermes-profiles.md).
+  - Serial focused checks: profile protocol 14 (100% branches), scoped views 2, Bridge profile routing 17, gateway spawn 1, health 6; Mobile profile adapter 7, adapter lifecycle 57, recorded OpenClaw/Hermes adapters 41, coordinator 208, Thread 74, section 12, summary 12; historical Bridge replay 9. Protocol/Bridge/Mobile types, local Bridge build and docs (8 instruction pairs, 5 regressions) pass. Native history integration: 13/14 pass; its context-window expectation fails identically on the unchanged baseline with this installed Hermes, retained as an environment limitation. No skipped failing assertion or native-source fix.
+  - PR [#2](https://github.com/franckbouda/clawket/pull/2): the first CI found missing empty/oversized/malformed-key test branches; the added boundary cases pass with 100% focused coverage. A later Mobile replay exposed an extra await on the legacy Hermes listing path; preserve immediate legacy dispatch and complete connection snapshots, with all 57 lifecycle cases passing. The Windows run also retained an unrelated Codex owner-lock replacement failure; subsequent CI must pass without weakening that check. Final CI/merge evidence belongs to the PR. A merge does not update an installed Bridge or phone; local profile API readiness, phone pairing and inference remain separate acceptance evidence.
+
 - 2026-10-13 iPhone Duo 适配原生验收完成，进入主分支交付（负责人授权）。
   - 当前结果：专用iOS27.1 Duo真实折叠/展开/旋转/半折、左右Split View、软键盘中文组合、草稿/重命名/附件连续、真实Codex/Hermes会话与停止/后台恢复、长按/图片缩放、完整PNG导出、大字号/深色/RTL已按范围验证。session06/08正常退出，08含85步；保留其余失败runner及原因，不概括全绿。39/40原生日志证实同输入/window的markedText与选区保持；57为完整1002×4148导出。模拟器恢复中文、Large、浅色与原Pro状态。详细证据/限制/复现见[实施记录](26-iphone-duo.md)。
   - 候选25db585a的CI38389638288十一项通过；main移至cd859de5后重基，保留评价hook、触摸取消，新增持续busy门控避免已有任务跨导航触发邀请。最终CI/合并及main模拟器安装以PR #220和本机交付记录为准；目前不声明已发布。OpenClaw无本轮原生E2E、VoiceOver完整遍历/真机/交易未测；既有列表内嵌Markdown表格限制单列，不扩大重构。
@@ -2024,6 +2030,7 @@ Clawket 3.0 围绕统一 Agent 花名册与持续线程重构：新增 Hermes �
 
 | 位置（文件 § 节） | 规格原文 | 实际做法 | 理由 | 影响 |
 |---|---|---|---|---|
+| 2026-10-15 · `00-decisions.md` §2 / §6 / §13 | Hermes 单 Agent / 单分组、模型全局。 | 负责人明确要求添加全部本地 Hermes profiles；同连接按原生 profile 显示 Agent，模型在所选 profile 内全局。 | 现有用户有多个原生 profile；单 Agent 隐藏其余人格。 | 新能力协商、命名空间与管理作用域；旧 App/Bridge/OpenClaw 保持兼容，不改免费额度或发布边界。 |
 | 2026-10-02 · `08-milestones.md` M3 CLI 能力输出 | status / doctor 显示 Bridge 能力列表；命令面不变。 | 默认摘要，能力和路径留在 `--verbose`；诊断聚合已授权新 Agent，补 JSON/统一日志选项。 | 负责人明确要求全面审计与正收益优化；旧默认信息过量且漏掉新后端。 | 保留能力信息、协议、配对身份及旧后台服务范围；无发布/部署。 |
 | 2026-09-22 · 花名册排序与时间 | 同连接 Agent 强制相邻；预览优先 main；缓存行显示同步时间，徽标替代时间。 | 负责人授权完整优化：跨连接全局置顶 / 活动排序；预览与活动时间同源，非 main 标来源；缓存仍显示活动时间，徽标在时间下方。 | 隐式分组搬动无关 Agent、时间含义变化让聊天列表难以理解；另修局部快照污染与旧响应回写。 | main 点击和单活连接策略保留；Hermes 新增向后兼容活动字段，旧 Bridge 回退原行为；用户负责设备验收。 |
 | 2026-09-21 · 00 §9 / 02 §5 WAF 实施 | WS 30/IP/min，四条 WAF，日用量三阈值和 Discord。 | 按本次负责人明确的正常使用与稳定性优先要求，WS 初始防洪阈值 120，配对 20 补双后端路径，使用 Pro 两条规则；机器 API 不加挑战。日用量/Discord 保留未完成状态。 | 最高成功建连样本 25/min 已接近 30，共享 IP 与新版通道需余量；Pro 规则额度/周期及原生告警能力与旧规格不符。 | 降低误伤同时保留边缘防洪；未降低候选代码注册 10/hour、8 MiB、认证和 liveness 门禁。该项不视为完全满足原始 30/min 规格，前后配置及回退见专项报告。 |
@@ -2084,6 +2091,7 @@ Clawket 3.0 围绕统一 Agent 花名册与持续线程重构：新增 Hermes �
 
 | 编号 | 事项 | 怎么做 | 验证方法 | 状态 |
 |---|---|---|---|---|
+| HT-HERMES-PROFILES-1015 | 多 profile 的本机 / 手机验收 | 更新包含本改动的本地 Bridge 和 App；通过 Hermes 官方设置为需要聊天的每个 profile 配置独立 API_SERVER_KEY，保留已有密钥。 | 各 `/p/<name>/v1/models` 鉴权成功；手机逐 profile 查看历史、发送/停止、模型/技能/文件/定时/用量隔离；旧连接仍可用。 | 代码与受控验证见本次 PR；已安装 Bridge/App 不随合并更新，未声称完成手机/推理验收。 |
 | HT-DUO-INPUT-1013 | Duo 真实交互验收的备用自动化授权 | 回答已发送的异步问题，明确允许使用苹果 XCTest/XCUITest 在专用本地模拟器输入、长按、滚动与断言。CUA 坐标/拖动持续 noWindowsAvailable，键盘未生效；工具规则要求用户明确指定其他 UI 自动化后才能使用。 | 真实选图完成隔离配对，再验证中文草稿、长按、分屏、折叠/旋转和恢复；结果不能由单元测试替代。 | 已解决：负责人明确允许XCTest/XCUITest；原生交互证据已完成，session06/08正常退出。最终主分支交付与负责人验收见PR #220及本机acceptance.html。 |
 | HT-DUO-TOOLCHAIN-1013 | Duo 工具链的本机认证与系统重启 | 已授权下载 macOS26.7.1、同意 Xcode27.1/SDK 许可；负责人完成本机管理员认证，并确认安装/重启时机。无需在聊天提供密码。 | 升级后 macOS≥26.6，Xcode27.1 初始化成功，可安装官方 Duo runtime 并继续分支原生验收。 | 已完成：负责人授权重启后macOS26.7.1、Xcode27.1初始化与Duo runtime安装成功，首个Debug包已运行；原生体验验收继续。 |
 | HT-IOS-REVIEW-1013 | iOS 原生评分验收与增长效果 | 后续授权 App 构建/发布时验证手动商店链接、原生邀请与升级冷却；发布前留存商店评分基线，发布后按周对比新增评分/活跃iOS设备及新评分分布。 | TestFlight 不验证真实评分弹窗；不把 API 成功当成展示/提交或均分提升。 | 代码验证随本 PR；未构建、上传、提交或发布。 |
