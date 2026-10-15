@@ -158,17 +158,19 @@ export class HermesAdapter extends GatewayAdapterBase {
   }
 
   public async listAgents(): Promise<AgentDescriptor[]> {
+    if (!this.bridgeCapabilities.includes(HERMES_PROFILES_CAPABILITY)) return [this.hermesAgent()];
     const profiles = await this.listProfiles();
     return [this.hermesAgent(), ...profiles.map(profile => ({ connectionId: this.connection.id,
       agentId: profile.agentId, name: profile.name, isMain: false, mainSessionKey: profile.mainSessionKey }))];
   }
 
-  public async listSessions(agentId?: string): Promise<SessionDescriptor[]> {
+  public async listSessions(_agentId?: string): Promise<SessionDescriptor[]> {
     return this.readSessionSnapshot(async () => {
       if (!this.capabilities.sessions) return [legacyHermesMainSession(this.connection.id)];
-      const profiles = await this.listProfiles();
+      const profiles = this.bridgeCapabilities.includes(HERMES_PROFILES_CAPABILITY) ? await this.listProfiles() : [];
       const result: SessionDescriptor[] = [];
-      const scopes = [null, ...profiles.map(profile => profile.name)].filter(profile => !agentId || agentId === (profile ? hermesProfileAgentId(profile) : 'hermes'));
+      // Publish a complete connection snapshot, including when a page requests one Agent.
+      const scopes = [null, ...profiles.map(profile => profile.name)];
       for (const profile of scopes) {
         const gateway = profile ? profileGateway(this.gateway, profile, () => this.bridgeCapabilities.includes(HERMES_PROFILES_CAPABILITY)) : this.gateway;
         const payload = await this.invoke(() => gateway.request<{ sessions?: GatewaySessionRecord[] }>('sessions.list', { limit: 200 }));

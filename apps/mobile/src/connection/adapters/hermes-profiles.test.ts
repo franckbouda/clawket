@@ -48,7 +48,7 @@ it('exposes each profile as an Agent, with isolated main keys and recorded legac
       ['hermes', 'My Mac', 'main'], ['hermes-profile.coder', 'coder', 'agent:hermes-profile.coder:main'], ['hermes-profile.work', 'work', 'agent:hermes-profile.work:main'],
     ]);
     expect((await adapter.listSessions()).map(session => [session.agentId, session.kind])).toEqual([['hermes', 'main'], ['hermes-profile.coder', 'main'], ['hermes-profile.work', 'main']]);
-    expect((await adapter.listSessions('hermes-profile.work')).map(session => session.agentId)).toEqual(['hermes-profile.work']);
+    expect((await adapter.listSessions('hermes-profile.work')).map(session => session.agentId)).toEqual(['hermes', 'hermes-profile.coder', 'hermes-profile.work']);
   } finally { adapter.dispose(); }
 });
 it('binds model, skills, files, cron and usage operations to the page Agent without global selection', async () => {
