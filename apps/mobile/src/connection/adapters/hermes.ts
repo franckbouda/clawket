@@ -1,3 +1,5 @@
+import { HERMES_PROFILES_CAPABILITY, hermesAgentProfile, hermesProfileAgentId, hermesProfileSessionKey, parseHermesProfileSessionKey, type HermesProfileDescriptor } from '@clawket/agent-protocol';
+import { profileGateway } from './hermes-profile-gateway';
 import type { SessionFilesOperations } from '@clawket/agent-protocol';
 import { withSkillInvocations } from './skill-invocation';
 import { explicitModelReference } from '../../utils/model-catalog';
@@ -52,6 +54,7 @@ import { BRIDGE_REMOTE_UPDATE_CAPABILITY, type BridgeUpdateOperations } from '@c
 import { bridgeUpdateOperations } from './bridge-update';
 
 export const HERMES_MULTI_SESSION_CAPABILITY = 'hermes.multi-session.v2';
+const NO_PROFILE_MANAGEMENT: ManagementOperations = Object.freeze({});
 
 export class HermesAdapter extends GatewayAdapterBase {
   private readonly artifactOperations: import('@clawket/agent-protocol').ArtifactOperations = {
@@ -72,6 +75,7 @@ export class HermesAdapter extends GatewayAdapterBase {
 
   private healthObserved = false;
   private healthRevision = 0;
+  private profileGeneration = 0;
   private bridgeName: string | undefined;
   private bridgeVersion: string | undefined;
   private bridgeCapabilities: ReadonlyArray<string> = Object.freeze([]);
@@ -98,6 +102,7 @@ export class HermesAdapter extends GatewayAdapterBase {
 
   public override disconnect(): void {
     this.healthRevision += 1;
+    this.profileGeneration += 1;
     this.healthObserved = false;
     this.bridgeVersion = undefined;
     this.bridgeCapabilities = Object.freeze([]);
@@ -125,18 +130,51 @@ export class HermesAdapter extends GatewayAdapterBase {
     return healthy && this.healthObserved;
   }
 
-  public async listAgents(): Promise<AgentDescriptor[]> {
-    return [this.hermesAgent()];
+  private readonly profileManagement = new Map<string, ManagementOperations>();
+  public managementForAgent(agentId: string): ManagementOperations {
+    const profile = hermesAgentProfile(agentId);
+    if (!profile) {
+      if (agentId !== 'hermes') return NO_PROFILE_MANAGEMENT;
+      return this.management;
+    }
+    let operations = this.profileManagement.get(profile);
+    if (!operations) { operations = this.createManagementOperations(profile); this.profileManagement.set(profile, operations); }
+    return operations;
   }
 
-  public async listSessions(): Promise<SessionDescriptor[]> {
+  private async listProfiles(): Promise<HermesProfileDescriptor[]> {
+    if (!this.bridgeCapabilities.includes(HERMES_PROFILES_CAPABILITY)) return [];
+    const revision = this.profileGeneration;
+    const payload = await this.invoke(() => this.gateway.request<{ profiles?: HermesProfileDescriptor[] }>('hermes.profiles.list', {}));
+    if (!this.healthObserved || revision !== this.profileGeneration) throw new AdapterError('server', 'Hermes connection changed. Retry.');
+    if (!Array.isArray(payload.profiles) || payload.profiles.length > 128) throw new AdapterError('server', 'Invalid Hermes profiles.');
+    const seen = new Set<string>();
+    for (const profile of payload.profiles) {
+      if (!profile || typeof profile.name !== 'string' || profile.agentId !== hermesProfileAgentId(profile.name)
+        || profile.mainSessionKey !== hermesProfileSessionKey(profile.name, 'main') || seen.has(profile.name)) throw new AdapterError('server', 'Invalid Hermes profiles.');
+      seen.add(profile.name);
+    }
+    return payload.profiles;
+  }
+
+  public async listAgents(): Promise<AgentDescriptor[]> {
+    const profiles = await this.listProfiles();
+    return [this.hermesAgent(), ...profiles.map(profile => ({ connectionId: this.connection.id,
+      agentId: profile.agentId, name: profile.name, isMain: false, mainSessionKey: profile.mainSessionKey }))];
+  }
+
+  public async listSessions(agentId?: string): Promise<SessionDescriptor[]> {
     return this.readSessionSnapshot(async () => {
       if (!this.capabilities.sessions) return [legacyHermesMainSession(this.connection.id)];
-      const payload = await this.invoke(() => this.gateway.request<{
-        sessions?: GatewaySessionRecord[];
-      }>('sessions.list', { limit: 200 }));
-      return (Array.isArray(payload?.sessions) ? payload.sessions : [])
-        .map((session) => mapHermesSession(this.connection.id, session));
+      const profiles = await this.listProfiles();
+      const result: SessionDescriptor[] = [];
+      const scopes = [null, ...profiles.map(profile => profile.name)].filter(profile => !agentId || agentId === (profile ? hermesProfileAgentId(profile) : 'hermes'));
+      for (const profile of scopes) {
+        const gateway = profile ? profileGateway(this.gateway, profile, () => this.bridgeCapabilities.includes(HERMES_PROFILES_CAPABILITY)) : this.gateway;
+        const payload = await this.invoke(() => gateway.request<{ sessions?: GatewaySessionRecord[] }>('sessions.list', { limit: 200 }));
+        result.push(...(Array.isArray(payload?.sessions) ? payload.sessions : []).map(session => mapHermesSession(this.connection.id, session)));
+      }
+      return result;
     });
   }
 
@@ -175,9 +213,13 @@ export class HermesAdapter extends GatewayAdapterBase {
     }
   }
 
-  public async createSession(_agentId: string, options?: { title?: string }): Promise<SessionDescriptor> {
+  public async createSession(agentId: string, options?: { title?: string }): Promise<SessionDescriptor> {
     this.assertMultiSession(HERMES_MULTI_SESSION_CAPABILITY);
-    const payload = await this.invoke(() => this.gateway.request<{
+    const profile = hermesAgentProfile(agentId);
+    if (!profile && agentId !== 'hermes') throw new AdapterError('unsupported', 'Unknown Hermes Agent.');
+    if (profile && !this.bridgeCapabilities.includes(HERMES_PROFILES_CAPABILITY)) throw new AdapterError('unsupported', 'Update the Bridge to use Hermes profiles.');
+    const gateway = profile ? profileGateway(this.gateway, profile, () => this.bridgeCapabilities.includes(HERMES_PROFILES_CAPABILITY)) : this.gateway;
+    const payload = await this.invoke(() => gateway.request<{
       session?: GatewaySessionRecord;
     }>('sessions.create', {
       ...(options?.title ? { title: options.title } : {}),
@@ -262,6 +304,7 @@ export class HermesAdapter extends GatewayAdapterBase {
   protected override handleGatewayConnectionTransition(state: LegacyConnectionState): void {
     if (state === 'connecting' || state === 'reconnecting' || state === 'closed') {
       this.healthRevision += 1;
+      this.profileGeneration += 1;
       this.healthObserved = false;
       this.bridgeVersion = undefined;
       this.bridgeCapabilities = Object.freeze([]);
@@ -341,21 +384,22 @@ export class HermesAdapter extends GatewayAdapterBase {
     }
   }
 
-  private createManagementOperations(): ManagementOperations {
+  private createManagementOperations(profile?: string): ManagementOperations {
     const adapter = this;
+    const gateway = profile ? profileGateway(this.gateway, profile, () => this.bridgeCapabilities.includes(HERMES_PROFILES_CAPABILITY)) : this.gateway;
     return {
       get approvals() {
         return adapter.capabilities.execApproval ? {
-          listExec: (sessionKey: string) => adapter.invoke(() => adapter.gateway.request<Array<{ sessionKey: string; approval: Extract<ApprovalRequest, { kind: 'exec' }> }>>('exec.approval.list', { sessionKey })),
-          resolveExec: (id: string, decision: 'allow-once' | 'allow-always' | 'deny') => adapter.invoke(() => adapter.gateway.resolveExecApproval(id, decision)) } : undefined;
+          listExec: (sessionKey: string) => adapter.invoke(() => gateway.request<Array<{ sessionKey: string; approval: Extract<ApprovalRequest, { kind: 'exec' }> }>>('exec.approval.list', { sessionKey })),
+          resolveExec: (id: string, decision: 'allow-once' | 'allow-always' | 'deny') => adapter.invoke(() => gateway.resolveExecApproval(id, decision)) } : undefined;
       },
       models: {
         get health() { return adapter.capabilities.modelHealth
-          ? (options?: { probe?: boolean }) => adapter.invoke(() => adapter.gateway.request<ModelHealthReport>('model.health', { probe: options?.probe === true }))
+          ? (options?: { probe?: boolean }) => adapter.invoke(() => gateway.request<ModelHealthReport>('model.health', { probe: options?.probe === true }))
           : undefined; },
-        list: () => this.invoke(() => this.gateway.listModels()),
-        getSelection: () => this.invoke(() => this.gateway.getModelSelectionState()),
-        setSelection: (params) => this.invoke(() => this.gateway.setModelSelection({
+        list: () => this.invoke(() => gateway.listModels()),
+        getSelection: () => this.invoke(() => gateway.getModelSelectionState()),
+        setSelection: (params) => this.invoke(() => gateway.setModelSelection({
           ...params,
           scope: 'global',
           sessionKey: null,
@@ -363,58 +407,58 @@ export class HermesAdapter extends GatewayAdapterBase {
         listThinkingLevels: () => ['off', 'minimal', 'low', 'medium', 'high', 'xhigh'],
       },
       skills: {
-        status: async () => withSkillInvocations(await this.invoke(() => this.gateway.getSkillsStatus('main')), 'instruction'),
-        get: (key, params) => this.invoke(() => this.gateway.getSkillDetail(key, {
+        status: async () => withSkillInvocations(await this.invoke(() => gateway.getSkillsStatus('main')), 'instruction'),
+        get: (key, params) => this.invoke(() => gateway.getSkillDetail(key, {
           ...params,
           agentId: 'main',
         })),
-        update: (key, patch) => this.invoke(() => this.gateway.updateSkill(key, patch)),
+        update: (key, patch) => this.invoke(() => gateway.updateSkill(key, patch)),
         updateContent: (key, content) => this.invoke(() => (
-          this.gateway.updateSkillContent(key, content, 'main')
+          gateway.updateSkillContent(key, content, 'main')
         )),
-        remove: (key) => this.invoke(() => this.gateway.deleteSkill(key, 'main')),
+        remove: (key) => this.invoke(() => gateway.deleteSkill(key, 'main')),
         discover: (query) => discoverSkills(query),
         get install() {
           if (!adapter.bridgeCapabilities.includes('hermes.skills-install.v1')) return undefined;
-          return (input: { source: 'clawhub'; owner: string; slug: string }) => adapter.invoke(() => adapter.gateway.request<SkillStatusEntry>('skills.install', input));
+          return (input: { source: 'clawhub'; owner: string; slug: string }) => adapter.invoke(() => gateway.request<SkillStatusEntry>('skills.install', input));
         },
       },
       cron: {
-        list: (params) => this.listCron(params),
-        add: (job) => this.addCron(job),
-        update: (id, patch) => this.updateCron(id, patch),
-        remove: async (id) => ({ ok: await this.invoke(() => this.gateway.removeHermesCronJob(id)) }),
-        run: (id) => this.invoke(() => this.gateway.runHermesCronJob(id)),
-        runs: (params) => this.listCronRuns(params),
-        runContent: (entry) => this.loadCronRunContent(entry),
+        list: (params) => this.listCron(params, gateway),
+        add: (job) => this.addCron(job, gateway),
+        update: (id, patch) => this.updateCron(id, patch, gateway),
+        remove: async (id) => ({ ok: await this.invoke(() => gateway.removeHermesCronJob(id)) }),
+        run: (id) => this.invoke(() => gateway.runHermesCronJob(id)),
+        runs: (params) => this.listCronRuns(params, gateway),
+        runContent: (entry) => this.loadCronRunContent(entry, gateway),
       },
       agents: {
         list: async () => ({
-          defaultId: 'hermes',
-          mainKey: 'main',
+          defaultId: profile ? hermesProfileAgentId(profile) : 'hermes',
+          mainKey: profile ? hermesProfileSessionKey(profile, 'main') : 'main',
           agents: [{
-            id: 'hermes',
-            name: this.bridgeName || this.connection.label || 'Hermes',
-            identity: { name: this.bridgeName || this.connection.label || 'Hermes', emoji: '\u{1FABD}' },
+            id: profile ? hermesProfileAgentId(profile) : 'hermes',
+            name: profile || this.bridgeName || this.connection.label || 'Hermes',
+            identity: { name: profile || this.bridgeName || this.connection.label || 'Hermes', emoji: '\u{1FABD}' },
           }],
         }),
         files: {
-          list: () => this.invoke(() => this.gateway.listAgentFiles('main')),
-          get: (name) => this.invoke(() => this.gateway.getAgentFile(name, 'main')),
+          list: () => this.invoke(() => gateway.listAgentFiles('main')),
+          get: (name) => this.invoke(() => gateway.getAgentFile(name, 'main')),
           set: (name, content) => this.invoke(() => (
-            this.gateway.setAgentFile(name, content, 'main')
+            gateway.setAgentFile(name, content, 'main')
           )),
         },
       },
       usage: {
-        sessions: ({ startDate, endDate }) => this.invoke(() => this.gateway.fetchUsage({ startDate, endDate })),
-        cost: ({ startDate, endDate }) => this.invoke(() => this.gateway.fetchCostSummary({ startDate, endDate })),
+        sessions: ({ startDate, endDate }) => this.invoke(() => gateway.fetchUsage({ startDate, endDate })),
+        cost: ({ startDate, endDate }) => this.invoke(() => gateway.fetchCostSummary({ startDate, endDate })),
       },
     };
   }
 
-  private async listCron(params: CronListParams = {}): Promise<CronListResult> {
-    const rawJobs = await this.invoke(() => this.gateway.listHermesCronJobs({
+  private async listCron(params: CronListParams = {}, gateway = this.gateway): Promise<CronListResult> {
+    const rawJobs = await this.invoke(() => gateway.listHermesCronJobs({
       includeDisabled: params.includeDisabled ?? params.enabled !== 'enabled',
     }));
     let jobs = rawJobs.map(mapHermesCronJob);
@@ -440,16 +484,16 @@ export class HermesAdapter extends GatewayAdapterBase {
     return { jobs: page, total, offset, limit, hasMore, nextOffset: hasMore ? offset + page.length : null };
   }
 
-  private async addCron(job: CronJobCreate): Promise<CronJob> {
+  private async addCron(job: CronJobCreate, gateway = this.gateway): Promise<CronJob> {
     const input = toHermesCronUpsert(job);
-    if (job.payload.kind === 'agentTurn' && job.payload.model) Object.assign(input, await this.resolveCronModel(job.payload.model));
-    const created = await this.invoke(() => this.gateway.createHermesCronJob(input));
+    if (job.payload.kind === 'agentTurn' && job.payload.model) Object.assign(input, await this.resolveCronModel(job.payload.model, gateway));
+    const created = await this.invoke(() => gateway.createHermesCronJob(input));
     if (!created) throw new AdapterError('server', 'Hermes did not return the created scheduled task');
     return mapHermesCronJob(created);
   }
 
-  private async updateCron(id: string, patch: CronJobPatch): Promise<CronJob> {
-    const current = await this.invoke(() => this.gateway.getHermesCronJob(id));
+  private async updateCron(id: string, patch: CronJobPatch, gateway = this.gateway): Promise<CronJob> {
+    const current = await this.invoke(() => gateway.getHermesCronJob(id));
     if (!current) throw new AdapterError('server', `Hermes scheduled task was not found: ${id}`);
     const nativePatch: Partial<HermesCronJobUpsert> = {};
     const extendedPatch = patch as CronJobPatch & { skills?: string[] };
@@ -458,24 +502,24 @@ export class HermesAdapter extends GatewayAdapterBase {
     if (patch.payload !== undefined) nativePatch.prompt = cronPrompt(patch.payload);
     if (patch.payload?.kind === 'agentTurn' && patch.payload.model !== undefined
       && (patch.payload.model || '') !== (current.model ? explicitModelReference(current.provider || '', current.model) : '')) {
-      Object.assign(nativePatch, await this.resolveCronModel(patch.payload.model));
+      Object.assign(nativePatch, await this.resolveCronModel(patch.payload.model, gateway));
     }
     if (patch.delivery !== undefined) nativePatch.deliver = hermesDeliveryTarget(patch.delivery, current.deliver);
     if (extendedPatch.skills !== undefined) nativePatch.skills = extendedPatch.skills;
     let updated = Object.keys(nativePatch).length > 0
-      ? await this.invoke(() => this.gateway.updateHermesCronJob(id, nativePatch))
-      : await this.invoke(() => this.gateway.getHermesCronJob(id));
+      ? await this.invoke(() => gateway.updateHermesCronJob(id, nativePatch))
+      : await this.invoke(() => gateway.getHermesCronJob(id));
     if (!updated) throw new AdapterError('server', `Hermes scheduled task was not found: ${id}`);
-    if (patch.enabled === false && updated.enabled) updated = await this.invoke(() => this.gateway.pauseHermesCronJob(id));
-    else if (patch.enabled === true && !updated.enabled) updated = await this.invoke(() => this.gateway.resumeHermesCronJob(id));
+    if (patch.enabled === false && updated.enabled) updated = await this.invoke(() => gateway.pauseHermesCronJob(id));
+    else if (patch.enabled === true && !updated.enabled) updated = await this.invoke(() => gateway.resumeHermesCronJob(id));
     if (!updated) throw new AdapterError('server', `Hermes scheduled task was not found: ${id}`);
     return mapHermesCronJob(updated);
   }
 
-  private async resolveCronModel(reference: string | null): Promise<Partial<HermesCronJobUpsert>> {
+  private async resolveCronModel(reference: string | null, gateway = this.gateway): Promise<Partial<HermesCronJobUpsert>> {
     if (!this.capabilities.cronModel) throw new AdapterError('unsupported', 'Update the Bridge to configure task models');
     if (!reference?.trim()) return { model: '', provider: '', base_url: '' };
-    const models = await this.invoke(() => this.gateway.listModels());
+    const models = await this.invoke(() => gateway.listModels());
     const matches = models.filter((model) => explicitModelReference(model.provider, model.id) === reference.trim());
     if (matches.length !== 1) throw new AdapterError('server', 'Choose an available task model');
     const model = matches[0];
@@ -483,8 +527,8 @@ export class HermesAdapter extends GatewayAdapterBase {
       provider: model.provider, base_url: '' };
   }
 
-  private async listCronRuns(params: CronRunsParams): Promise<CronRunsResult> {
-    const outputs = await this.invoke(() => this.gateway.listHermesCronOutputs({
+  private async listCronRuns(params: CronRunsParams, gateway = this.gateway): Promise<CronRunsResult> {
+    const outputs = await this.invoke(() => gateway.listHermesCronOutputs({
       ...(params.scope === 'job' && params.id ? { jobId: params.id } : {}),
       limit: Math.max(1, (params.offset ?? 0) + (params.limit ?? 100)),
     }));
@@ -500,9 +544,9 @@ export class HermesAdapter extends GatewayAdapterBase {
   }
 
   /** Hermes keeps each run's full output as a file; the run entry carries its name. */
-  private async loadCronRunContent(entry: CronRunLogEntry): Promise<CronRunContent> {
+  private async loadCronRunContent(entry: CronRunLogEntry, gateway = this.gateway): Promise<CronRunContent> {
     if (!entry.outputRef) return { deliveries: [] };
-    const detail = await this.invoke(() => this.gateway.getHermesCronOutput(entry.jobId, entry.outputRef!));
+    const detail = await this.invoke(() => gateway.getHermesCronOutput(entry.jobId, entry.outputRef!));
     const raw = detail?.content?.trim();
     // Native files prepend scheduler instructions and the input prompt. The
     // reader leads with the actual response; unknown formats retain their text.
@@ -518,11 +562,12 @@ export function mapHermesSession(
 ): SessionDescriptor {
   const source = session.source ?? 'bridge';
   const nativeReadOnly = source === 'native';
-  const isMain = session.key === 'main';
+  const profile = parseHermesProfileSessionKey(session.key);
+  const isMain = (profile?.key ?? session.key) === 'main';
   const actions = session.allowedActions;
   return {
     connectionId,
-    agentId: 'hermes',
+    agentId: profile ? hermesProfileAgentId(profile.profile) : 'hermes',
     key: session.key,
     kind: isMain
       ? 'main'

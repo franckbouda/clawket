@@ -146,6 +146,8 @@ export interface AgentAdapter {
     respond(key: string, id: string, answer: { value?: string; confirmed?: boolean; cancelled?: boolean; answers?: Record<string, string[]> }): Promise<void>;
   };
   management?: ManagementOperations;
+  /** Stable per-Agent operations; never changes the connection or transport owner. */
+  managementForAgent?(agentId: string): ManagementOperations;
   sessionFiles?: SessionFilesOperations;
   artifacts?: ArtifactOperations;
   /** Present only while the connected Bridge negotiated `bridgeRemoteUpdate`. */

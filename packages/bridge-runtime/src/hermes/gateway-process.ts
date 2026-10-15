@@ -53,6 +53,8 @@ export function spawnHermesGateway(input: {
   const env: NodeJS.ProcessEnv = {
     ...process.env,
     HERMES_HOME: input.hermesHomePath,
+    // Pin this managed child to its configured home, never the interactive active_profile.
+    HERMES_GATEWAY_EXTERNAL_SUPERVISOR: '1',
     API_SERVER_ENABLED: 'true',
     API_SERVER_KEY: input.apiKey,
     API_SERVER_HOST: extractHostname(input.apiBaseUrl),

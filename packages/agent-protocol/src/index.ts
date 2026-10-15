@@ -9,3 +9,5 @@ export * from './mock';
 export * from './session-files';
 export * from './session-catalog';
 export * from './profile';
+export * from './hermes-profiles';
+export * from './scoped-adapter';

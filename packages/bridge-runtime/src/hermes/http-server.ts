@@ -16,7 +16,7 @@ import {
   readRequestPathname,
 } from './internal.js';
 
-export type HermesLocalBridgeClient = { socket: WebSocket; isAlive: boolean };
+export type HermesLocalBridgeClient = { socket: WebSocket; isAlive: boolean; profiles?: boolean };
 
 export type HermesHttpContextSnapshot = {
   running: boolean;
@@ -26,6 +26,7 @@ export type HermesHttpContextSnapshot = {
 };
 
 export abstract class HermesHttpServerMethods {
+  declare options: { onProfileEvent?: (event: string, payload: unknown) => void };
   declare projectArtifactContent: (key: string, content: unknown) => unknown;
   declare getBridgeCapabilities: () => string[];
   declare apiBaseUrl: string;
@@ -154,6 +155,7 @@ export abstract class HermesHttpServerMethods {
     const startedAt = Date.now();
     try {
       const payload = await this.dispatchRequest(request.method, request.params ?? {});
+      if (request.method === 'hermes.profiles.list' && this.clients.has(client)) client.profiles = true;
       this.logSlowBridgeRequest(request.method, startedAt);
       this.sendResponse(client.socket, request.id, payload);
     } catch (error) {
@@ -197,9 +199,14 @@ export abstract class HermesHttpServerMethods {
     if (event === 'chat' && chat?.state === 'final' && typeof chat.sessionKey === 'string' && chat.message?.role === 'assistant') {
       payload = { ...chat, message: { ...chat.message, content: this.projectArtifactContent(chat.sessionKey, chat.message.content) } };
     }
+    if (this.options.onProfileEvent) { this.options.onProfileEvent(event, payload); return; }
     for (const client of this.clients) {
       this.sendEvent(client.socket, event, payload);
     }
+  }
+
+  broadcastProfileEvent(event: string, payload: unknown): void {
+    for (const client of this.clients) if (client.profiles) this.sendEvent(client.socket, event, payload);
   }
 
   sendEvent(socket: WebSocket, event: string, payload: unknown): void {

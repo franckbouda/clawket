@@ -16,6 +16,8 @@ Codex native roster previews request summary turns, never full tool transcripts;
 | `src/openclaw/runtime.ts` | OpenClaw `BridgeRuntime`, on-demand Gateway lifecycle, and Bridge-owned connect metadata termination |
 | `src/hermes/index.ts` | `HermesLocalBridge` assembly, lifecycle, and request dispatch |
 | `src/hermes/http-server.ts` | Local Hermes HTTP/WebSocket server, authentication, health, and connection handling |
+| `src/hermes/profiles.ts` | Bounded profile discovery, allowlisted routing and isolated profile contexts on one owner |
+| `src/hermes/history-reconciliation.ts` | Native/live history identity reconciliation |
 | `src/hermes/session-store.ts` | Bridge-owned session metadata and session-ID rotation |
 | `src/hermes/native-sessions.ts` | Read-only native SessionDB listing/history and history cursors |
 | `src/hermes/usage-ledger.ts` | Clawket usage/cost ledger plus read-only native usage reconciliation |
@@ -324,3 +326,5 @@ Codex steering stays inside its original native turn. Project bounded native `tu
 ## Official service addresses
 
 CLI normalizes exact official Relay aliases before runtime startup; retain invitation ciphertext/keys and pairing identity. Local-model Relay's optional `registryUrl` records provenance for same-Registry refresh; older configs recover it from the existing invitation. Local model keeps its isolated Preview-named resources in every App environment. See `../../docs/3.1/connection-domains.md`.
+
+Hermes `hermes.profiles.v1` is additive: named homes use native `/p/<profile>/` API routing and their own credentials, state readers, stores, runs, approvals and file grants. Keep default/legacy contracts unchanged, fail closed on unknown/conflicting scopes, and forward profile events only to sockets that discovered profiles. Contexts never start native gateways/listeners; stop and update admission include their owned work. Managed native gateways pin their configured home with `HERMES_GATEWAY_EXTERNAL_SUPERVISOR=1`. See `../../docs/3.1/hermes-profiles.md`.

@@ -178,7 +178,7 @@ Owner rules (2026-09-26, after the development Mac froze three times): never run
 
 1. Hermes adapter lifecycle state (run, session, stop) must be self-contained and deterministically cleanable inside the adapter layer.
 2. Hermes relay must use isolated infrastructure (separate workers, KV, Durable Objects); do not modify OpenClaw relay deploy units or public contracts.
-3. Hermes model switching is global-scoped only; do not build per-session model state.
+3. Hermes model switching is global within each native profile; do not build per-session model state. Named profiles are separate Agents only after `hermes.profiles.v1` negotiation (owner decision 2026-10-15); see `docs/3.1/hermes-profiles.md`.
 4. Detailed implementation rules for each area live in the relevant workspace `AGENTS.md` files.
 5. Hermes relay runtime health cannot rely only on websocket open state or cloud bridge attachment. When maintaining long-lived Hermes relay connections, prefer real request/response probes against the local Hermes bridge so stale bridge sockets are actively recycled.
 

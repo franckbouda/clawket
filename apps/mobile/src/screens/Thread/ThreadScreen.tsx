@@ -1,3 +1,4 @@
+import { scopeAgentAdapter } from '@clawket/agent-protocol';
 import { AgentQuestions } from './AgentQuestions';
 import { ConversationEntry } from './ConversationEntry';
 import { SessionPreferencesService } from '../../services/session-preferences';
@@ -244,7 +245,8 @@ function ThreadScreenContent({
   const analyticsOpenedKeyRef = useRef<string | null>(null);
   const { connectionId, agentId, sessionKey, from } = route.params;
   const routeIsActive = connections.activeConnectionId === connectionId;
-  const adapter = routeIsActive && !locked ? connections.activeAdapter : null;
+  const rawAdapter = routeIsActive && !locked ? connections.activeAdapter : null;
+  const adapter = useMemo(() => scopeAgentAdapter(rawAdapter, agentId), [rawAdapter, agentId]);
   const capabilities = adapter?.capabilities ?? NO_CAPABILITIES;
   const fileAttachmentsEnabled = supportsFileAttachments(capabilities);
   const paused = connections.pausedConnectionIds?.includes(connectionId) ?? false;

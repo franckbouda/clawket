@@ -1,3 +1,4 @@
+import { scopeAgentAdapter } from '@clawket/agent-protocol';
 import { NativeQuotaCard } from './NativeQuotaCard';
 import { useUsageCalendar } from './useUsageCalendar';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -152,7 +153,8 @@ export function AgentSettingsScreen({
   onRefresh,
   ...viewProps
 }: AgentSettingsScreenProps): React.JSX.Element {
-  const accessibleAdapter = permissionDenied ? null : adapter;
+  const scopedAdapter = useMemo(() => scopeAgentAdapter(adapter, agent?.agentId), [adapter, agent?.agentId]);
+  const accessibleAdapter = permissionDenied ? null : scopedAdapter;
   const [connectionState, setConnectionState] = useState<ConnectionState>(
     accessibleAdapter?.state ?? 'offline',
   );
