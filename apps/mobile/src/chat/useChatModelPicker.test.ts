@@ -451,6 +451,28 @@ describe('useChatModelPicker', () => {
     expect(result.current.availableModels).toEqual([]);
   });
 
+  it('keeps the freshly discovered picker catalog when selection metadata still has an older snapshot', async () => {
+    const fresh = [{ id: 'vendor/new', name: 'New', provider: 'custom' }];
+    const adapter = createAdapter({ list: jest.fn().mockResolvedValue(fresh),
+      getSelection: jest.fn().mockResolvedValue(modelSelection('vendor/current', 'custom', {
+        models: [{ id: 'vendor/removed', name: 'Removed', provider: 'custom' }],
+      })) });
+    const { result } = renderHook(() => useChatModelPicker({ connectionState: 'ready', adapter,
+      sessionKey: 'agent:main:main', setInput: jest.fn(), setSessions: jest.fn() }));
+    await act(async () => { result.current.openModelPicker(); });
+    expect(result.current.availableModels).toEqual(fresh);
+    expect(result.current.currentModel).toBe('vendor/current');
+  });
+
+  it('keeps an opaque vendor namespace in a model command fallback', () => {
+    const setInput = jest.fn();
+    const adapter = createAdapter();
+    const { result } = renderHook(() => useChatModelPicker({ connectionState: 'connecting', adapter,
+      sessionKey: 'main', setInput, setSessions: jest.fn() }));
+    act(() => { result.current.onSelectModel({ id: 'unsloth/Qwen', provider: 'unsloth', name: 'Qwen' }); });
+    expect(setInput).toHaveBeenCalledWith('/model unsloth/unsloth/Qwen');
+  });
+
   it('fills a /model command when selection cannot run while disconnected', () => {
     const setInput = jest.fn();
     let sessions: SessionInfo[] = [

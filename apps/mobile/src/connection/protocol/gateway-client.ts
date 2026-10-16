@@ -1481,9 +1481,20 @@ export class GatewayProtocolClient {
     return this.request('agents.delete', { agentId, deleteFiles });
   }
 
-  public async listModels(): Promise<GatewayModelInfo[]> {
-    const result = await this.request<{ models?: GatewayModelInfo[] }>('models.list', {});
-    return result?.models ?? [];
+  public async listModels(options: { refresh?: boolean } = {}): Promise<GatewayModelInfo[]> {
+    const read = (params: { refresh?: boolean }) => this.request<{ models?: GatewayModelInfo[] }>('models.list', params);
+    try {
+      const result = await read(options.refresh ? { refresh: true } : {});
+      return result?.models ?? [];
+    } catch (error) {
+      // Older Gateways reject the additive field with a closed-schema error.
+      // Authentication, network and provider failures must remain visible.
+      const message = error instanceof Error ? error.message : '';
+      if (!options.refresh || !/refresh/i.test(message)
+        || !/(?:unexpected|unknown|unrecognized|additional|not allowed|unsupported).*(?:property|field|param)|(?:property|field|param).*(?:unexpected|unknown|unrecognized|additional|not allowed|unsupported)/i.test(message)) throw error;
+      const result = await read({});
+      return result?.models ?? [];
+    }
   }
 
   public async getCurrentModelState(): Promise<{

@@ -389,8 +389,8 @@ export class OpenClawAdapter extends GatewayAdapterBase {
       modelRef = (typeof model === 'string' ? model : model?.primary)?.trim() ?? '';
     }
     const slash = modelRef.indexOf('/');
-    if (slash >= 0) {
-      provider ||= modelRef.slice(0, slash);
+    if (!provider && slash >= 0) {
+      provider = modelRef.slice(0, slash);
       modelRef = modelRef.slice(slash + 1);
     }
     return { currentModel: modelRef, currentProvider: provider, currentBaseUrl: '', models, ...thinking };
@@ -398,7 +398,8 @@ export class OpenClawAdapter extends GatewayAdapterBase {
 
   private async writeModelSelection(input: ModelSelectionWrite): Promise<ModelSelectionWriteResult> {
     const model = input.model.trim();
-    const reference = model.includes('/') || !input.provider ? model : `${input.provider}/${model}`;
+    const provider = input.provider?.trim();
+    const reference = provider ? `${provider}/${model}` : model;
     if (!model) throw new AdapterError('server', 'A model is required');
     const scope = input.scope ?? 'global';
     let thinking: SessionThinking = {};
@@ -527,7 +528,7 @@ export class OpenClawAdapter extends GatewayAdapterBase {
     const adapter = this;
     return {
       models: {
-        list: () => this.invoke(() => this.gateway.listModels()),
+        list: () => this.invoke(() => this.gateway.listModels({ refresh: true })),
         getSelection: (sessionKey) => this.invoke(() => this.readModelSelection(sessionKey)),
         setSelection: (params) => this.invoke(() => this.writeModelSelection(params)),
         // Older Gateways: the sheet offers this list and writes through `/think <level>`.

@@ -101,7 +101,8 @@ export abstract class HermesCommandMethods {
       [
         'import inspect, json, re, sys',
         'from hermes_cli.config import load_config, save_config',
-        'from hermes_cli.model_switch import switch_model, parse_model_flags, list_authenticated_providers',
+        'from hermes_cli import model_switch',
+        'from hermes_cli.model_switch import switch_model, list_authenticated_providers',
         'from hermes_cli.auth import _load_auth_store',
         'from hermes_cli.models import OPENROUTER_MODELS, _PROVIDER_MODELS, provider_model_ids',
         'def build_provider_listing(cfg, current_provider, max_models=50):',
@@ -212,7 +213,9 @@ export abstract class HermesCommandMethods {
         'current_model = model_cfg.get("default", "") if isinstance(model_cfg, dict) else ""',
         'current_provider = model_cfg.get("provider", "openrouter") if isinstance(model_cfg, dict) else "openrouter"',
         'current_base_url = model_cfg.get("base_url", "") if isinstance(model_cfg, dict) else ""',
-        'model_input, explicit_provider = parse_model_flags(payload.get("raw_args", ""))[:2]',
+        'parse_flags = getattr(model_switch, "parse_model_flags_detailed", None) or getattr(model_switch, "parse_model_flags")',
+        'parsed = parse_flags(payload.get("raw_args", ""))',
+        'model_input, explicit_provider = (parsed.model_input, parsed.explicit_provider) if hasattr(parsed, "model_input") else parsed[:2]',
         'user_providers = dict(cfg.get("providers") or {}) if isinstance(cfg.get("providers"), dict) else {}',
         'for custom_provider in cfg.get("custom_providers") or []:',
         '  if not isinstance(custom_provider, dict):',
@@ -292,14 +295,15 @@ export abstract class HermesCommandMethods {
     const startedAt = Date.now();
     const payload = (await this.runHermesPython<unknown>(
       [
-        'import inspect, json',
+        'import inspect, json, sys',
+        'refresh_catalog = bool(json.loads(sys.stdin.read() or "{}").get("refresh", False))',
         'import time',
         'from hermes_cli.config import load_config',
         'from hermes_cli.model_switch import list_authenticated_providers',
         'from hermes_cli.auth import _load_auth_store',
         'from hermes_cli.models import OPENROUTER_MODELS, _PROVIDER_MODELS, provider_model_ids',
         'def build_provider_listing(cfg, current_provider, max_models=50):',
-        '  provider_kwargs = {"current_provider": current_provider, "user_providers": cfg.get("providers"), "custom_providers": cfg.get("custom_providers"), "max_models": max_models}',
+        '  provider_kwargs = {"current_provider": current_provider, "user_providers": cfg.get("providers"), "custom_providers": cfg.get("custom_providers"), "max_models": max_models, "refresh": refresh_catalog, "probe_current_custom_provider": refresh_catalog, "current_base_url": str((cfg.get("model") or {}).get("base_url") or ""), "current_model": str((cfg.get("model") or {}).get("default") or "")}',
         '  try:',
         '    provider_params = inspect.signature(list_authenticated_providers).parameters',
         '    if not any(param.kind == inspect.Parameter.VAR_KEYWORD for param in provider_params.values()):',
@@ -430,6 +434,7 @@ export abstract class HermesCommandMethods {
         '  "_debugModelCount": len(models),',
         '}))',
       ].join('\n'),
+      { refresh: options.forceRefresh === true },
     ));
     const payloadRecord = isRecord(payload) ? payload : {};
     const debugTimings = isRecord(payloadRecord._debugTimings) ? payloadRecord._debugTimings : null;

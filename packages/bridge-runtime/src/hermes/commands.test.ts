@@ -7,7 +7,7 @@ import { cleanupTempDirectories, createTempDirectory } from './test-helpers.js';
 afterEach(cleanupTempDirectories);
 
 describe('Hermes model API signature compatibility', () => {
-  for (const signature of ['legacy', 'custom-providers', 'five-flags'] as const) {
+  for (const signature of ['legacy', 'custom-providers', 'five-flags', 'structured-flags'] as const) {
     it(`switches a custom provider with the ${signature} switch_model signature`, async () => {
       const root = await createTempDirectory();
       const source = join(root, 'source');
@@ -26,11 +26,23 @@ describe('Hermes model API signature compatibility', () => {
       )).toContain('Model switched to next-model.');
     });
   }
+  it('refreshes a cached Hermes catalog through the native discovery settings', async () => {
+    const root = await createTempDirectory();
+    const source = join(root, 'source');
+    await writeFakeHermesModules(source, 'structured-flags');
+    const bridge = new HermesLocalBridge({ hermesSourcePath: source, hermesHomePath: join(root, 'home'),
+      hermesPythonPath: process.platform === 'win32' ? 'python' : 'python3',
+      sessionStorePath: join(root, 'sessions.json'), usageLedgerPath: join(root, 'usage.json') });
+    expect((await bridge.readHermesModelState()).models.map(model => model.id)).not.toContain('vendor/fresh');
+    expect((await bridge.readHermesModelState({ forceRefresh: true })).models.map(model => model.id)).toContain('vendor/fresh');
+    expect((await bridge.readHermesModelState()).models.map(model => model.id)).toContain('vendor/fresh');
+  });
+
 });
 
 async function writeFakeHermesModules(
   source: string,
-  signature: 'legacy' | 'custom-providers' | 'five-flags',
+  signature: 'legacy' | 'custom-providers' | 'five-flags' | 'structured-flags',
 ): Promise<void> {
   const packageDir = join(source, 'hermes_cli');
   await mkdir(packageDir, { recursive: true });
@@ -54,7 +66,7 @@ async function writeFakeHermesModules(
   ]);
 }
 
-function buildFakeModelSwitchModule(signature: 'legacy' | 'custom-providers' | 'five-flags'): string {
+function buildFakeModelSwitchModule(signature: 'legacy' | 'custom-providers' | 'five-flags' | 'structured-flags'): string {
   const listSignature = signature === 'legacy'
     ? 'current_provider, user_providers=None, max_models=50'
     : 'current_provider, user_providers=None, custom_providers=None, max_models=50';
@@ -66,12 +78,14 @@ function buildFakeModelSwitchModule(signature: 'legacy' | 'custom-providers' | '
     : 'assert isinstance(custom_providers, list) and custom_providers';
   return [
     'from types import SimpleNamespace',
-    `def list_authenticated_providers(${listSignature}): return []`,
-    'def parse_model_flags(raw_args):',
+    signature === 'structured-flags'
+      ? `def list_authenticated_providers(${listSignature}, refresh=False, probe_current_custom_provider=False, **kwargs): return [{"slug": "custom:fake-provider", "models": ["vendor/fresh"], "total_models": 1}] if refresh and probe_current_custom_provider else []`
+      : `def list_authenticated_providers(${listSignature}): return []`,
+    signature === 'structured-flags' ? 'def parse_model_flags_detailed(raw_args):' : 'def parse_model_flags(raw_args):',
     '  parts = raw_args.split(" --provider ", 1)',
     '  model = parts[0].replace(" --global", "").strip()',
     '  provider = parts[1].split()[0] if len(parts) > 1 else ""',
-    signature === 'five-flags' ? '  return model, provider, True, False, False' : '  return model, provider, True',
+    signature === 'structured-flags' ? '  return SimpleNamespace(model_input=model, explicit_provider=provider)' : signature === 'five-flags' ? '  return model, provider, True, False, False' : '  return model, provider, True',
     `def switch_model(${switchSignature}):`,
     `  ${compatibilityAssertion}`,
     '  return SimpleNamespace(',

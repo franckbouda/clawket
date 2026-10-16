@@ -19,6 +19,8 @@ OpenClaw may be inspected at `../../../../openclaw` or `/Users/developer/Desktop
 
 ## Product architecture
 
+Model catalog IDs are opaque native IDs, including vendor slashes. Keep the provider separate when constructing OpenClaw references or reading session selections. Opening the model picker requests a fresh catalog; retry without the additive refresh parameter only after an explicit legacy field/schema rejection, never on authentication or provider failure.
+
 The stable iOS RosterController must report its current busy state to the automatic-review safe gate, including while all roster view hosts are hidden. Keep touch cancellation on every host; an already-open task must still block a later Thread-to-Roster review opportunity.
 
 The scanner's local `clawket-reserved-regions` Expo view reads active UIKit division/occlusion frames synchronously in `layoutSubviews`, including empty results and same-bounds changes. Keep new SDK symbols behind the Objective-C compile/runtime guards; older SDKs, older iOS and Catalyst report no regions. Place its observer over the unchanged camera host, never query a shared application window. Scanner controls/cutout use one available rectangle within the existing four-edge safe area; region frames already include margins. Invalidate the measured QR frame on region changes and reject same-size old native positions until measurement matches the current cutout. Do not apply this scanner-specific grouping to continuous chat content or infer regions from device identity/hinge angles.
