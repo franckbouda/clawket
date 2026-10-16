@@ -7,7 +7,7 @@ import { cleanupTempDirectories, createTempDirectory } from './test-helpers.js';
 afterEach(cleanupTempDirectories);
 
 describe('Hermes model API signature compatibility', () => {
-  for (const signature of ['legacy', 'custom-providers', 'five-flags', 'structured-flags'] as const) {
+  for (const signature of ['legacy', 'custom-providers', 'five-flags', 'structured-flags', 'named-providers'] as const) {
     it(`switches a custom provider with the ${signature} switch_model signature`, async () => {
       const root = await createTempDirectory();
       const source = join(root, 'source');
@@ -42,7 +42,7 @@ describe('Hermes model API signature compatibility', () => {
 
 async function writeFakeHermesModules(
   source: string,
-  signature: 'legacy' | 'custom-providers' | 'five-flags' | 'structured-flags',
+  signature: 'legacy' | 'custom-providers' | 'five-flags' | 'structured-flags' | 'named-providers',
 ): Promise<void> {
   const packageDir = join(source, 'hermes_cli');
   await mkdir(packageDir, { recursive: true });
@@ -51,7 +51,9 @@ async function writeFakeHermesModules(
     writeFile(join(packageDir, 'config.py'), [
       'CONFIG = {',
       '  "model": {"default": "old-model", "provider": "custom:fake-provider"},',
-      '  "custom_providers": [{"name": "Fake Provider", "base_url": "http://127.0.0.1:9/v1", "model": "old-model"}],',
+      signature === 'named-providers'
+        ? '  "providers": {"fake-provider": {"name": "Fake Provider", "base_url": "http://127.0.0.1:9/v1"}},'
+        : '  "custom_providers": [{"name": "Fake Provider", "base_url": "http://127.0.0.1:9/v1", "model": "old-model"}],',
       '}',
       'def load_config(): return CONFIG',
       'def save_config(cfg): pass',
@@ -66,26 +68,30 @@ async function writeFakeHermesModules(
   ]);
 }
 
-function buildFakeModelSwitchModule(signature: 'legacy' | 'custom-providers' | 'five-flags' | 'structured-flags'): string {
+function buildFakeModelSwitchModule(signature: 'legacy' | 'custom-providers' | 'five-flags' | 'structured-flags' | 'named-providers'): string {
   const listSignature = signature === 'legacy'
     ? 'current_provider, user_providers=None, max_models=50'
     : 'current_provider, user_providers=None, custom_providers=None, max_models=50';
   const switchSignature = signature === 'legacy'
     ? 'raw_input, current_provider, current_model, current_base_url="", current_api_key="", is_global=False, explicit_provider="", user_providers=None'
     : 'raw_input, current_provider, current_model, current_base_url="", current_api_key="", is_global=False, explicit_provider="", user_providers=None, custom_providers=None';
-  const compatibilityAssertion = signature === 'legacy'
+  const compatibilityAssertion = signature === 'named-providers'
+    ? 'assert "fake-provider" in (user_providers or {}) and explicit_provider == "fake-provider"'
+    : signature === 'legacy'
     ? 'assert "custom:fake-provider" in (user_providers or {})'
     : 'assert isinstance(custom_providers, list) and custom_providers';
   return [
     'from types import SimpleNamespace',
     signature === 'structured-flags'
       ? `def list_authenticated_providers(${listSignature}, refresh=False, probe_current_custom_provider=False, **kwargs): return [{"slug": "custom:fake-provider", "models": ["vendor/fresh"], "total_models": 1}] if refresh and probe_current_custom_provider else []`
-      : `def list_authenticated_providers(${listSignature}): return []`,
-    signature === 'structured-flags' ? 'def parse_model_flags_detailed(raw_args):' : 'def parse_model_flags(raw_args):',
+      : signature === 'named-providers'
+        ? `def list_authenticated_providers(${listSignature}): return [{"slug": "fake-provider", "name": "Fake Provider", "source": "user-config", "api_url": "http://127.0.0.1:9/v1", "models": ["old-model"]}]`
+        : `def list_authenticated_providers(${listSignature}): return []`,
+    signature === 'structured-flags' || signature === 'named-providers' ? 'def parse_model_flags_detailed(raw_args):' : 'def parse_model_flags(raw_args):',
     '  parts = raw_args.split(" --provider ", 1)',
     '  model = parts[0].replace(" --global", "").strip()',
     '  provider = parts[1].split()[0] if len(parts) > 1 else ""',
-    signature === 'structured-flags' ? '  return SimpleNamespace(model_input=model, explicit_provider=provider)' : signature === 'five-flags' ? '  return model, provider, True, False, False' : '  return model, provider, True',
+    signature === 'structured-flags' || signature === 'named-providers' ? '  return SimpleNamespace(model_input=model, explicit_provider=provider)' : signature === 'five-flags' ? '  return model, provider, True, False, False' : '  return model, provider, True',
     `def switch_model(${switchSignature}):`,
     `  ${compatibilityAssertion}`,
     '  return SimpleNamespace(',

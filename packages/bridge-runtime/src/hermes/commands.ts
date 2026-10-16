@@ -953,6 +953,13 @@ function canonicalizeHermesProviderSlug(
     }
   }
 
+  if (normalized.startsWith('custom:')) {
+    const name = normalized.slice('custom:'.length);
+    const configured = providers.find(entry => entry.source === 'user-config' && entry.apiUrl
+      && normalizeHermesProviderAlias(entry.slug) === name);
+    if (configured) return configured.slug;
+  }
+
   for (const entry of providers) {
     const aliases = new Set([
       normalizeHermesProviderAlias(entry.name),
