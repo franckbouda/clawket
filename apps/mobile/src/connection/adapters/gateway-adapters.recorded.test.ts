@@ -237,6 +237,26 @@ describe('OpenClawAdapter recorded v1 boundary', () => {
     expect(fake.requests.some(({ method }) => method === 'model.get' || method === 'model.set')).toBe(false);
   });
 
+  it('keeps vendor namespaces distinct from OpenClaw provider identity', async () => {
+    const fake = new RecordedGateway();
+    fake.sessions = [{ key: 'agent:main:main', model: 'unsloth/Qwen3.8-27B-GGUF', modelProvider: 'unsloth' }];
+    const listModels = jest.fn(async () => [{ id: 'unsloth/Qwen3.8-27B-GGUF', name: 'Qwen', provider: 'unsloth' }]);
+    Object.assign(fake, { listModels });
+    const adapter = new OpenClawAdapter(connection('openclaw'), { gateway: gateway(fake) });
+    await expect(adapter.management.models!.getSelection!('agent:main:main')).resolves.toMatchObject({
+      currentModel: 'unsloth/Qwen3.8-27B-GGUF', currentProvider: 'unsloth',
+    });
+    await adapter.management.models!.list!();
+    expect(listModels).toHaveBeenLastCalledWith({ refresh: true });
+    await expect(adapter.management.models!.setSelection!({ scope: 'session', sessionKey: 'agent:main:main',
+      model: 'unsloth/Qwen3.8-27B-GGUF', provider: 'unsloth' })).resolves.toMatchObject({
+      currentModel: 'unsloth/Qwen3.8-27B-GGUF', currentProvider: 'unsloth',
+    });
+    expect(fake.requests.at(-1)).toEqual({ method: 'sessions.patch', params: {
+      key: 'agent:main:main', model: 'unsloth/unsloth/Qwen3.8-27B-GGUF',
+    } });
+  });
+
   it('reads the thinking levels a 2026.x Gateway reports per session and writes them with sessions.patch', async () => {
     const fake = new RecordedGateway();
     const levels = (...ids: string[]) => ids.map((id) => ({ id, label: id }));

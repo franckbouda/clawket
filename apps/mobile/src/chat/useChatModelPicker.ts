@@ -26,9 +26,8 @@ export type ModelInfo = {
 
 function resolveProviderModel(model: ModelInfo): string {
   const modelRef = model.id.trim() || model.name;
-  if (modelRef.includes('/')) return modelRef;
-  const provider = model.provider.trim() || 'unknown';
-  return `${provider}/${modelRef}`;
+  const provider = model.provider.trim();
+  return provider ? `${provider}/${modelRef}` : modelRef;
 }
 
 type Props = {
@@ -259,7 +258,7 @@ export function useChatModelPicker({
       if (models.getSelection) {
         const selection = await models.getSelection(requestAdapter.capabilities.modelPerSession ? sessionKey : undefined);
         if (!isCurrent()) return;
-        if (valueRevision === modelValueRevisionRef.current) hydrateModelSelection(selection);
+        if (valueRevision === modelValueRevisionRef.current) hydrateModelSelection({ ...selection, models: available });
       }
     } catch (err: unknown) {
       if (!isSameScope()) return;

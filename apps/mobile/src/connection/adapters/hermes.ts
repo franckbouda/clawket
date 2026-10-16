@@ -399,7 +399,7 @@ export class HermesAdapter extends GatewayAdapterBase {
         get health() { return adapter.capabilities.modelHealth
           ? (options?: { probe?: boolean }) => adapter.invoke(() => gateway.request<ModelHealthReport>('model.health', { probe: options?.probe === true }))
           : undefined; },
-        list: () => this.invoke(() => gateway.listModels()),
+        list: () => this.invoke(() => gateway.listModels({ refresh: true })),
         getSelection: () => this.invoke(() => gateway.getModelSelectionState()),
         setSelection: (params) => this.invoke(() => gateway.setModelSelection({
           ...params,

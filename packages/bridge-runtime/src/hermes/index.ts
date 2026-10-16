@@ -964,7 +964,7 @@ export class HermesLocalBridge {
         return this.readHermesUsageBundle(payload).costSummary;
       case 'models.list':
         return {
-          models: (await this.readHermesModelState({ caller: 'models.list' })).models,
+          models: (await this.readHermesModelState({ forceRefresh: payload.refresh === true, caller: 'models.list' })).models,
         };
       case 'model.current':
         return (await this.readHermesCurrentModelState());
