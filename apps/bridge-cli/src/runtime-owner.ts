@@ -4,7 +4,9 @@ import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, realpathSync
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { readCliVersion } from './metadata.js';
-import { classifyOwnerRecord, readProcessStartedAt } from '@clawket/bridge-core';
+// Import the leaf module directly (not the package barrel) so esbuild-bundled
+// workers never pull in secure-pairing/tweetnacl CJS through index re-exports.
+import { classifyOwnerRecord, readProcessStartedAt } from '@clawket/bridge-core/process-identity';
 
 export type RuntimeOwner = {
   protocol: 1; pid: number; token: string; endpoint: string; version: string;
