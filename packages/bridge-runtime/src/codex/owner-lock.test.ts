@@ -2,15 +2,18 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { existsSync, mkdtempSync, readFileSync, renameSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { readProcessStartedAt } from '@clawket/bridge-core';
 import { acquireCodexOwnerLock } from './owner-lock.js';
 
 let root: string, path: string;
 beforeEach(() => { root = mkdtempSync(join(tmpdir(), 'codex-owner-')); path = join(root, 'owner.lock'); });
 afterEach(() => { vi.restoreAllMocks(); rmSync(root, { recursive: true, force: true }); });
 
-it('retains the legacy PID format and excludes another live owner', () => {
+it('records the owner identity and excludes another live owner', () => {
   const close = acquireCodexOwnerLock(path);
-  expect(readFileSync(path, 'utf8')).toBe(String(process.pid));
+  const record = JSON.parse(readFileSync(path, 'utf8')) as { v: number; pid: number; startedAt?: string };
+  expect(record.v).toBe(1); expect(record.pid).toBe(process.pid);
+  if (process.platform !== 'win32') expect(typeof record.startedAt).toBe('string');
   expect(() => acquireCodexOwnerLock(path)).toThrow('already managed');
   close(); expect(existsSync(path)).toBe(false);
 });
@@ -18,8 +21,22 @@ it('reclaims a confirmed dead PID and releases its recovery guard', () => {
   writeFileSync(path, '12345');
   vi.spyOn(process, 'kill').mockImplementation(() => { throw Object.assign(new Error('gone'), { code: 'ESRCH' }); });
   const close = acquireCodexOwnerLock(path);
-  expect(readFileSync(path, 'utf8')).toBe(String(process.pid));
+  expect((JSON.parse(readFileSync(path, 'utf8')) as { pid: number }).pid).toBe(process.pid);
   expect(existsSync(path + '.recovery')).toBe(false); close();
+});
+it('reclaims a lock whose PID was reused by an unrelated process', () => {
+  if (process.platform === 'win32') return; // Start-time identity is unavailable on Windows.
+  const startedAt = readProcessStartedAt(process.pid);
+  expect(startedAt).not.toBeNull();
+  writeFileSync(path, JSON.stringify({ v: 1, pid: process.pid, startedAt: 'Fri Oct 03 12:00:00 2024' }));
+  const close = acquireCodexOwnerLock(path);
+  expect((JSON.parse(readFileSync(path, 'utf8')) as { pid: number }).pid).toBe(process.pid);
+  close();
+});
+it('keeps a legacy bare-PID lock when the same PID is still alive', () => {
+  writeFileSync(path, String(process.pid));
+  expect(() => acquireCodexOwnerLock(path)).toThrow('already managed');
+  expect(readFileSync(path, 'utf8')).toBe(String(process.pid));
 });
 it('does not let a concurrent recovery remove the first replacement', () => {
   writeFileSync(path, '12345');
@@ -28,7 +45,7 @@ it('does not let a concurrent recovery remove the first replacement', () => {
     throw Object.assign(new Error('gone'), { code: 'ESRCH' });
   });
   const close = acquireCodexOwnerLock(path);
-  expect(readFileSync(path, 'utf8')).toBe(String(process.pid)); close();
+  expect((JSON.parse(readFileSync(path, 'utf8')) as { pid: number }).pid).toBe(process.pid); close();
 });
 it('rejects a lock replaced during the PID probe without deleting the new owner', () => {
   writeFileSync(path, '12345');
