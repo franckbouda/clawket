@@ -12,6 +12,8 @@ import {
   buildRelayWsHeaders,
   buildRelayWsUrl,
   dedupePendingGatewayMessages,
+  capPendingGatewayMessages,
+  gatewayMessageBytes,
   BRIDGE_CAPABILITIES_V2,
   patchConnectResponseBridgeCapabilities,
   patchConnectRequestGatewayAuth,
@@ -407,6 +409,37 @@ describe('bridge runtime protocol helpers', () => {
       otherText: 1,
       binary: 1,
     });
+  });
+
+  it('measures queued gateway messages in wire bytes', () => {
+    // 'é' is two bytes in UTF-8, so the text size must use byte length.
+    expect(gatewayMessageBytes({ kind: 'text', text: 'hé' })).toBe(3);
+    expect(gatewayMessageBytes({ kind: 'binary', data: Buffer.alloc(10) })).toBe(10);
+  });
+
+  it('caps the gateway queue by frame count and total wire bytes', () => {
+    const miB = (size: number) => ({ kind: 'binary' as const, data: Buffer.alloc(size * 1024 * 1024) });
+
+    // Count cap: 256 queued frames + one incoming keeps the queue at 256.
+    const many = Array.from({ length: 256 }, () => ({ kind: 'text' as const, text: 'x' }));
+    const byCount = capPendingGatewayMessages(many, { kind: 'text', text: 'y' });
+    expect(byCount).toHaveLength(256);
+    expect(byCount[0].kind === 'text' && byCount[0].text).toBe('x');
+    expect(byCount.at(-1)).toEqual({ kind: 'text', text: 'y' });
+
+    // Byte cap: two 4 MiB frames + a 4 MiB incoming frame exceeds the
+    // 8 MiB total, so the oldest frame is dropped and the survivors fill
+    // exactly the cap.
+    const [first, second] = [miB(4), miB(4)];
+    const byBytes = capPendingGatewayMessages([first, second], miB(4));
+    expect(byBytes).toHaveLength(2);
+    expect(byBytes[0].kind === 'binary' && byBytes[0].data.equals(second.data)).toBe(true);
+    expect(gatewayMessageBytes(byBytes[0]) + gatewayMessageBytes(byBytes[1])).toBe(8 * 1024 * 1024);
+
+    // A single oversized incoming message survives alone.
+    const oversized = capPendingGatewayMessages([miB(4)], miB(9));
+    expect(oversized).toHaveLength(1);
+    expect(gatewayMessageBytes(oversized[0])).toBe(9 * 1024 * 1024);
   });
 
   it('keeps only the latest connect handshake when multiple are queued', () => {

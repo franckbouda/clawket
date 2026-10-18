@@ -137,6 +137,10 @@ const RECONNECT_MAX_DELAY_MS = 15_000;
 const CONNECT_HANDSHAKE_WARN_DELAY_MS = 8_000;
 const CHALLENGE_WAIT_TIMEOUT_MS = 8_000;
 const MAX_PENDING_GATEWAY_MESSAGES = 256;
+// Total wire bytes the idle gateway queue may hold. Each frame is already
+// capped at the shared application-frame limit, so this bounds worst-case
+// queue memory (previously 256 frames x 8 MiB ~= 2 GiB).
+const MAX_PENDING_GATEWAY_MESSAGE_BYTES = WEBSOCKET_FRAME_LIMIT_BYTES;
 const MAX_DEVICE_DETAILS = 32;
 const MAX_PENDING_PAIR_REQUESTS = 16;
 export const BRIDGE_CAPABILITIES_V2 = 'bridge.capabilities.v2';
@@ -1415,10 +1419,7 @@ export class BridgeRuntime {
   }
 
   private pushPendingGatewayMessage(message: PendingGatewayMessage): void {
-    if (this.pendingGatewayMessages.length >= MAX_PENDING_GATEWAY_MESSAGES) {
-      this.pendingGatewayMessages.shift();
-    }
-    this.pendingGatewayMessages.push(message);
+    this.pendingGatewayMessages = capPendingGatewayMessages(this.pendingGatewayMessages, message);
   }
 
   private dropStaleIdleGatewayQueue(): void {
@@ -1573,6 +1574,35 @@ export function shouldDropStaleConnectAfterGatewayReopen(
   isConnectHandshake: boolean,
 ): boolean {
   return false;
+}
+
+export function gatewayMessageBytes(message: PendingGatewayMessage): number {
+  return message.kind === 'text' ? Buffer.byteLength(message.text, 'utf8') : message.data.length;
+}
+
+export function capPendingGatewayMessages(
+  queued: readonly PendingGatewayMessage[],
+  incoming: PendingGatewayMessage,
+): PendingGatewayMessage[] {
+  const next = [...queued];
+  let totalBytes = 0;
+  for (const message of next) {
+    totalBytes += gatewayMessageBytes(message);
+  }
+  const incomingBytes = gatewayMessageBytes(incoming);
+  // Drop oldest messages first until both the frame-count and the total
+  // wire-byte caps have room for the incoming message. A single oversized
+  // message still survives alone: upstream frames are already bounded by
+  // the shared application-frame limit, so this only guards against a
+  // future regression there.
+  while (
+    next.length > 0
+    && (next.length >= MAX_PENDING_GATEWAY_MESSAGES || totalBytes + incomingBytes > MAX_PENDING_GATEWAY_MESSAGE_BYTES)
+  ) {
+    totalBytes -= gatewayMessageBytes(next.shift()!);
+  }
+  next.push(incoming);
+  return next;
 }
 
 export function summarizePendingGatewayMessages(messages: PendingGatewayMessage[]): PendingGatewayMessageSummary {
