@@ -44,6 +44,13 @@ import {
   WEBSOCKET_FRAME_LIMIT_BYTES,
 } from '../frame-limit.js';
 
+const securePairing = vi.hoisted(() => ({ consume: vi.fn(() => null) }));
+
+vi.mock('@clawket/bridge-core', async importOriginal => {
+  const actual = await importOriginal<typeof import('@clawket/bridge-core')>();
+  return { ...actual, consumeSecurePairingAttempt: securePairing.consume };
+});
+
 const tempDirs: string[] = [];
 
 afterEach(async () => {
@@ -810,6 +817,37 @@ describe('bridge runtime protocol helpers', () => {
         payload: { code: 'bridge_update_unavailable', message: 'Remote Bridge update is unavailable on this computer' } })]));
       expect(start).toHaveBeenCalledOnce();
     } finally { await disabled.runtime.stop(); }
+  });
+
+  it('answers handshake_failed when secure pairing state is unreadable and stays alive', async () => {
+    const sockets: FakeSocket[] = [];
+    const runtime = new BridgeRuntime({
+      config: BASE_CONFIG, gatewayUrl: 'ws://127.0.0.1:18789',
+      createWebSocket: (url) => { const socket = new FakeSocket(url); sockets.push(socket); return socket; },
+    });
+    runtime.start(); sockets[0].open();
+    const relay = sockets[0];
+    const controls = () => relay.sent.map(String).filter(frame => frame.startsWith('__clawket_relay_control__:'))
+      .map(frame => JSON.parse(frame.slice('__clawket_relay_control__:'.length)));
+    const start = (requestId: string) => relay.message(`__clawket_relay_control__:${JSON.stringify({
+      event: 'pairing.secure.start', requestId, sourceClientId: 'phone',
+      payload: { sessionId: `ps_${'a'.repeat(64)}`, clientPublicKey: 'A'.repeat(43), clientProof: 'b'.repeat(64) },
+    })}`);
+    try {
+      securePairing.consume.mockImplementation(() => { throw new Error('ENOSYS: attempts file unreadable'); });
+      start('secure-1');
+      await vi.waitFor(() => expect(controls()).toEqual(expect.arrayContaining([expect.objectContaining({
+        event: 'pairing.secure.error', requestId: 'secure-1', targetClientId: 'phone', payload: { protocol: 2, code: 'handshake_failed' },
+      })])));
+      securePairing.consume.mockImplementation(() => null);
+      start('secure-2');
+      await vi.waitFor(() => expect(controls()).toEqual(expect.arrayContaining([expect.objectContaining({
+        event: 'pairing.secure.error', requestId: 'secure-2', targetClientId: 'phone', payload: { protocol: 2, code: 'unavailable' },
+      })])));
+    } finally {
+      securePairing.consume.mockImplementation(() => null);
+      await runtime.stop();
+    }
   });
 
   it('forwards a canonical v1 connect request byte-identically through BridgeRuntime', async () => {
