@@ -1074,22 +1074,22 @@ export class BridgeRuntime {
       this.sendSecurePairingError(sourceClientId, requestId, 'invalid_request');
       return;
     }
-    const state = consumeSecurePairingAttempt(sessionId);
-    if (!state || state.gatewayId !== this.options.config.gatewayId) {
-      this.sendSecurePairingError(sourceClientId, requestId, 'unavailable');
-      return;
-    }
-    const expectedProof = createSecurePairingClientProof({
-      codeKeyHex: state.codeKeyHex,
-      sessionId,
-      requestId,
-      clientPublicKey,
-    });
-    if (!securePairingProofEquals(clientProof, expectedProof)) {
-      this.sendSecurePairingError(sourceClientId, requestId, 'invalid_code');
-      return;
-    }
     try {
+      const state = consumeSecurePairingAttempt(sessionId);
+      if (!state || state.gatewayId !== this.options.config.gatewayId) {
+        this.sendSecurePairingError(sourceClientId, requestId, 'unavailable');
+        return;
+      }
+      const expectedProof = createSecurePairingClientProof({
+        codeKeyHex: state.codeKeyHex,
+        sessionId,
+        requestId,
+        clientPublicKey,
+      });
+      if (!securePairingProofEquals(clientProof, expectedProof)) {
+        this.sendSecurePairingError(sourceClientId, requestId, 'invalid_code');
+        return;
+      }
       const clientKeyBytes = Buffer.from(clientPublicKey, 'base64url');
       if (clientKeyBytes.length !== nacl.box.publicKeyLength) throw new Error('invalid client key');
       const bridgeKeys = nacl.box.keyPair();
@@ -1127,6 +1127,7 @@ export class BridgeRuntime {
       });
       this.log(`secure pairing response sent requestId=${requestId}`);
     } catch {
+      // A synchronous failure (unreadable attempts file, crypto error) must not take down the Bridge.
       this.sendSecurePairingError(sourceClientId, requestId, 'handshake_failed');
     }
   }

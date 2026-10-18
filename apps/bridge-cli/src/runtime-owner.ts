@@ -4,10 +4,13 @@ import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, realpathSync
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { readCliVersion } from './metadata.js';
+// Import the leaf module directly (not the package barrel) so esbuild-bundled
+// workers never pull in secure-pairing/tweetnacl CJS through index re-exports.
+import { classifyOwnerRecord, readProcessStartedAt } from '@clawket/bridge-core/process-identity';
 
 export type RuntimeOwner = {
   protocol: 1; pid: number; token: string; endpoint: string; version: string;
-  entry: string; node: string; backend: string; configPath?: string; port?: number;
+  entry: string; node: string; backend: string; configPath?: string; port?: number; startedAt?: string;
 };
 const root = () => join(homedir(), '.clawket', 'update-owners');
 export function runtimeOwnerPath(backend: string, configPath?: string): string {
@@ -27,7 +30,8 @@ export function readRuntimeOwner(path: string): RuntimeOwner | null {
     || !['openclaw', 'hermes', 'hermes-relay', 'codex', 'claude-code', 'pi', 'local-model'].includes(value.backend)
     || typeof value.entry !== 'string' || typeof value.node !== 'string'
     || (value.configPath !== undefined && typeof value.configPath !== 'string')
-    || (value.port !== undefined && (!Number.isInteger(value.port) || value.port < 1 || value.port > 65535))) throw new Error('Invalid update owner record.');
+    || (value.port !== undefined && (!Number.isInteger(value.port) || value.port < 1 || value.port > 65535))
+    || (value.startedAt !== undefined && typeof value.startedAt !== 'string')) throw new Error('Invalid update owner record.');
   return value;
 }
 
@@ -40,15 +44,17 @@ export async function registerRuntimeOwner(input: {
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
   const previous = readRuntimeOwner(path);
   if (previous) {
-    try { process.kill(previous.pid, 0); throw new Error('An update owner is already running at this scope.'); }
-    catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error; }
+    const liveness = classifyOwnerRecord(previous);
+    if (liveness === 'live') throw new Error('An update owner is already running at this scope.');
+    if (liveness === 'unknown') throw new Error('The previous update owner process could not be verified; inspect local Bridge state.');
   }
   const id = randomUUID();
   // Keep Unix socket paths below macOS's 104-byte limit, independently of HOME length.
   const endpoint = process.platform === 'win32' ? `\\\\.\\pipe\\clawket-update-${id}` : `/tmp/clawket-update-${id}.sock`;
+  const startedAt = readProcessStartedAt(process.pid);
   const owner: RuntimeOwner = { protocol: 1, pid: process.pid, token: randomBytes(32).toString('hex'), endpoint,
     backend: input.backend, configPath: input.configPath, port: input.port, entry: realpathSync(input.entry ?? process.argv[1]),
-    node: input.node ?? process.execPath, version: input.version ?? readCliVersion() };
+    node: input.node ?? process.execPath, version: input.version ?? readCliVersion(), ...(startedAt ? { startedAt } : {}) };
   const clients = new Set<Socket>();
   let stopping = false;
   const server = createServer(socket => {

@@ -12,6 +12,7 @@ import { randomUUID, createHash } from 'node:crypto';
 import type { SessionDescriptor, SessionUpdate, SessionHistory, PromptInput, AgentQuestion } from '@clawket/agent-protocol';
 import { resolvePiExecutable } from './executable.js';
 import { nativePiDirectory, piPath } from './paths.js';
+import { classifyOwnerRecord, parseOwnerLockRecord, readProcessStartedAt } from '@clawket/bridge-core';
 import { PiRpc } from './rpc.js';
 import { piBranch, piMessages, piText, piUsage } from './history.js';
 import { persistedPiCursor, piPromptEntryId } from './prompt-identity.js';
@@ -43,13 +44,18 @@ export class PiService extends EventEmitter {
     this.agentDirectory = piPath(options.agentDirectory ?? options.env?.PI_CODING_AGENT_DIR ?? process.env.PI_CODING_AGENT_DIR ?? join(homedir(), '.pi', 'agent'), this.project);
     mkdirSync(options.directory, { recursive: true, mode: 0o700 });
     this.lockPath = join(options.directory, 'owner.lock');
-    try { writeFileSync(this.lockPath, String(process.pid), { flag: 'wx', mode: 0o600 }); }
+    const startedAt = readProcessStartedAt(process.pid);
+    const ownerLock = JSON.stringify({ v: 1, pid: process.pid, ...(startedAt ? { startedAt } : {}) });
+    try { writeFileSync(this.lockPath, ownerLock, { flag: 'wx', mode: 0o600 }); }
     catch {
-      const pid = Number(readFileSync(this.lockPath, 'utf8'));
-      let alive = true;
-      try { process.kill(pid, 0); } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ESRCH') alive = false; }
-      if (alive) throw new Error('This Pi project is already managed by another Bridge');
-      unlinkSync(this.lockPath); writeFileSync(this.lockPath, String(process.pid), { flag: 'wx', mode: 0o600 });
+      const prior = lstatSync(this.lockPath);
+      if (!prior.isFile() || prior.nlink !== 1 || prior.size > 256) throw new Error('Invalid Pi owner lock');
+      const record = parseOwnerLockRecord(readFileSync(this.lockPath, 'utf8'));
+      if (!record) throw new Error('Invalid Pi owner lock');
+      const liveness = classifyOwnerRecord(record);
+      if (liveness === 'live') throw new Error('This Pi project is already managed by another Bridge');
+      if (liveness === 'unknown') throw new Error('The Pi owner process could not be verified; inspect local Bridge state.');
+      unlinkSync(this.lockPath); writeFileSync(this.lockPath, ownerLock, { flag: 'wx', mode: 0o600 });
     }
     try {
       if (existsSync(this.indexPath)) {

@@ -1,13 +1,16 @@
 import { randomUUID } from 'node:crypto';
 import { lstatSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { classifyOwnerRecord, readProcessStartedAt } from '@clawket/bridge-core';
 import { ClaudeFault } from './errors.js';
 
 /** Shared by pairing metadata and native-session writers; never expires a live owner. */
 export class ClaudeOwnerLock {
   private readonly lockPath: string;
-  private readonly owner = JSON.stringify({ pid: process.pid, nonce: randomUUID() });
+  private readonly owner: string;
   constructor(private readonly directory: string) {
+    const startedAt = readProcessStartedAt(process.pid);
+    this.owner = JSON.stringify({ pid: process.pid, nonce: randomUUID(), ...(startedAt ? { startedAt } : {}) });
     mkdirSync(directory, { recursive: true, mode: 0o700 });
     if (!lstatSync(directory).isDirectory() || lstatSync(directory).isSymbolicLink()) throw new ClaudeFault('Invalid Claude owner directory');
     this.lockPath = join(directory, 'owner.lock');
@@ -33,8 +36,9 @@ export class ClaudeOwnerLock {
     try { prior = JSON.parse(readFileSync(this.lockPath, 'utf8')); }
     catch { throw new ClaudeFault('Invalid Claude owner lock'); }
     if (!Number.isSafeInteger(prior?.pid) || prior.pid <= 0) throw new ClaudeFault('Invalid Claude owner process');
-    try { process.kill(prior.pid, 0); throw new ClaudeFault('This Claude pairing already has a Bridge owner'); }
-    catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error; }
+    const liveness = classifyOwnerRecord(prior);
+    if (liveness === 'live') throw new ClaudeFault('This Claude pairing already has a Bridge owner');
+    if (liveness === 'unknown') throw new ClaudeFault('The Claude owner process could not be verified; inspect local Bridge state.');
     // Compare the inode again before removing a confirmed dead owner's lock.
     const current = lstatSync(this.lockPath);
     if (current.ino !== stat.ino || current.dev !== stat.dev) throw new ClaudeFault('Claude owner changed during recovery');

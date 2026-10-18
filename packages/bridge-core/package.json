@@ -11,6 +11,11 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
       "default": "./dist/index.js"
+    },
+    "./process-identity": {
+      "types": "./dist/process-identity.d.ts",
+      "import": "./dist/process-identity.js",
+      "default": "./dist/process-identity.js"
     }
   },
   "dependencies": {
