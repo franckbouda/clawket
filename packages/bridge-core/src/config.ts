@@ -1,14 +1,13 @@
 import { canonicalizeOfficialRelayUrl } from './official-relay.js';
-import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { homedir, hostname, userInfo } from 'node:os';
 import { join } from 'node:path';
+import { hardenPrivateFile, writeFileAtomic } from './private-file.js';
 
 const CONFIG_DIR = join(homedir(), '.clawket');
 const CONFIG_PATH = join(CONFIG_DIR, 'bridge-cli.json');
 const PREVIEW_CONFIG_PATH = join(CONFIG_DIR, 'bridge-cli.preview.json');
-const CONFIG_DIR_MODE = 0o700;
-const CONFIG_FILE_MODE = 0o600;
 
 export interface PairingConfig {
   serverUrl: string;
@@ -34,7 +33,7 @@ export function getPairingConfigDir(): string {
 export function readPairingConfig(environment: PairingEnvironment = 'production'): PairingConfig | null {
   const configPath = getPairingConfigPath(environment);
   if (!existsSync(configPath)) return null;
-  hardenPairingConfigPermissions(configPath);
+  hardenPrivateFile(configPath);
   try {
     const parsed = JSON.parse(readFileSync(configPath, 'utf8')) as Partial<PairingConfig>;
     if (!parsed.serverUrl || !parsed.gatewayId || !parsed.relaySecret || !parsed.relayUrl) {
@@ -55,6 +54,8 @@ export function readPairingConfig(environment: PairingEnvironment = 'production'
     }
     return normalized;
   } catch {
+    // Fixed category only: never log the file contents or credential values.
+    console.error(`clawket: pairing config at ${configPath} is unreadable or corrupted; ignoring stored value`);
     return null;
   }
 }
@@ -63,13 +64,7 @@ export function writePairingConfig(
   config: PairingConfig,
   environment: PairingEnvironment = 'production',
 ): void {
-  const configPath = getPairingConfigPath(environment);
-  ensurePairingConfigDir();
-  writeFileSync(configPath, JSON.stringify(config, null, 2) + '\n', {
-    encoding: 'utf8',
-    mode: CONFIG_FILE_MODE,
-  });
-  safeChmodSync(configPath, CONFIG_FILE_MODE);
+  writeFileAtomic(getPairingConfigPath(environment), JSON.stringify(config, null, 2) + '\n');
 }
 
 export function deletePairingConfig(environment: PairingEnvironment = 'production'): void {
@@ -123,26 +118,6 @@ function readOpenClawDefaultAgentName(): string | null {
     return pickOpenClawDefaultAgentName(parsed);
   } catch {
     return null;
-  }
-}
-
-function ensurePairingConfigDir(): void {
-  mkdirSync(CONFIG_DIR, { recursive: true, mode: CONFIG_DIR_MODE });
-  safeChmodSync(CONFIG_DIR, CONFIG_DIR_MODE);
-}
-
-function hardenPairingConfigPermissions(configPath: string): void {
-  if (existsSync(CONFIG_DIR)) {
-    safeChmodSync(CONFIG_DIR, CONFIG_DIR_MODE);
-  }
-  safeChmodSync(configPath, CONFIG_FILE_MODE);
-}
-
-function safeChmodSync(path: string, mode: number): void {
-  try {
-    chmodSync(path, mode);
-  } catch {
-    // best-effort only; Windows and some filesystems may reject chmod.
   }
 }
 
