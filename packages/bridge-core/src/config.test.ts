@@ -97,3 +97,43 @@ describe('pairing config permissions', () => {
     await expectPrivate(getPairingConfigPath('preview'), 0o600);
   });
 });
+
+describe('pairing config corruption diagnostics', () => {
+  it('reports an unreadable config instead of failing silently', async () => {
+    const homeDir = await mkdtemp(join(tmpdir(), 'clawket-bridge-config-corrupt-'));
+    tempDirs.push(homeDir);
+
+    const { getPairingConfigPath, readPairingConfig, writePairingConfig } = await loadConfigModule(homeDir);
+    writePairingConfig(BASE_CONFIG);
+    await writeFile(getPairingConfigPath(), '{not-json', 'utf8');
+
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    let read: unknown;
+    let capturedCalls: ReadonlyArray<ReadonlyArray<unknown>> = [];
+    try {
+      read = readPairingConfig();
+    } finally {
+      // mockRestore resets call history, so capture it before restoring.
+      capturedCalls = errorSpy.mock.calls;
+      errorSpy.mockRestore();
+    }
+    expect(read).toBeNull();
+    expect(capturedCalls).toHaveLength(1);
+    const message = String(capturedCalls[0]?.[0] ?? '');
+    expect(message).toContain('unreadable or corrupted');
+    expect(message).not.toContain(BASE_CONFIG.relaySecret);
+  });
+
+  it('publishes pairing configs atomically without leaving temporary files', async () => {
+    const homeDir = await mkdtemp(join(tmpdir(), 'clawket-bridge-config-atomic-'));
+    tempDirs.push(homeDir);
+
+    const { getPairingConfigDir, readPairingConfig, writePairingConfig } = await loadConfigModule(homeDir);
+    writePairingConfig(BASE_CONFIG);
+    writePairingConfig({ ...BASE_CONFIG, displayName: 'Renamed' });
+
+    expect(readPairingConfig()).toMatchObject({ displayName: 'Renamed' });
+    const { readdir } = await import('node:fs/promises');
+    expect(await readdir(getPairingConfigDir())).toEqual(['bridge-cli.json']);
+  });
+});

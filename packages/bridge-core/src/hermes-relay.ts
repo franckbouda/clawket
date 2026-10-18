@@ -1,9 +1,10 @@
 import { canonicalizeOfficialRelayUrl } from './official-relay.js';
-import { readFileSync, writeFileSync, existsSync, rmSync, mkdirSync } from 'node:fs';
+import { readFileSync, existsSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir, hostname } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { buildHermesRelayPairingQrPayload } from './qr.js';
+import { hardenPrivateFile, writeFileAtomic } from './private-file.js';
 
 const HERMES_RELAY_CONFIG_PATH = join(homedir(), '.clawket', 'hermes-relay.json');
 
@@ -42,6 +43,7 @@ export function getHermesRelayConfigPath(): string {
 
 export function readHermesRelayConfig(): HermesRelayConfig | null {
   if (!existsSync(HERMES_RELAY_CONFIG_PATH)) return null;
+  hardenPrivateFile(HERMES_RELAY_CONFIG_PATH);
   try {
     const parsed = JSON.parse(readFileSync(HERMES_RELAY_CONFIG_PATH, 'utf8')) as Partial<HermesRelayConfig>;
     if (!parsed.serverUrl || !parsed.bridgeId || !parsed.relaySecret || !parsed.relayUrl) {
@@ -58,13 +60,14 @@ export function readHermesRelayConfig(): HermesRelayConfig | null {
       updatedAt: parsed.updatedAt ?? new Date().toISOString(),
     };
   } catch {
+    // Fixed category only: never log the file contents or credential values.
+    console.error(`clawket: Hermes relay config at ${HERMES_RELAY_CONFIG_PATH} is unreadable or corrupted; ignoring stored value`);
     return null;
   }
 }
 
 export function writeHermesRelayConfig(config: HermesRelayConfig): void {
-  mkdirSync(join(homedir(), '.clawket'), { recursive: true });
-  writeFileSync(HERMES_RELAY_CONFIG_PATH, JSON.stringify(config, null, 2) + '\n', 'utf8');
+  writeFileAtomic(HERMES_RELAY_CONFIG_PATH, JSON.stringify(config, null, 2) + '\n');
 }
 
 export function deleteHermesRelayConfig(): void {

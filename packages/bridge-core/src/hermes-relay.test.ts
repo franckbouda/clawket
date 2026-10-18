@@ -1,6 +1,6 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 describe('hermes relay helpers', () => {
@@ -227,5 +227,58 @@ describe('hermes relay helpers', () => {
       relaySecret: 'hrs_new',
       relayUrl: 'wss://relay-local.example.com/ws',
     });
+  });
+
+  it('stores the Hermes relay config with user-private permissions', async () => {
+    const { getHermesRelayConfigPath, writeHermesRelayConfig } = await loadSubject();
+
+    writeHermesRelayConfig({
+      serverUrl: 'https://registry.example.com',
+      bridgeId: 'hbg_123',
+      relaySecret: 'hrs_123',
+      relayUrl: 'wss://relay.example.com/ws',
+      instanceId: 'hermes-host',
+      displayName: null,
+      createdAt: '2026-04-11T00:00:00.000Z',
+      updatedAt: '2026-04-11T00:00:00.000Z',
+    });
+
+    const configPath = getHermesRelayConfigPath();
+    if (process.platform !== 'win32') {
+      expect(statSync(configPath).mode & 0o777).toBe(0o600);
+      expect(statSync(dirname(configPath)).mode & 0o777).toBe(0o700);
+    }
+  });
+
+  it('reports a corrupted Hermes relay config instead of failing silently', async () => {
+    const { getHermesRelayConfigPath, readHermesRelayConfig, writeHermesRelayConfig } = await loadSubject();
+
+    writeHermesRelayConfig({
+      serverUrl: 'https://registry.example.com',
+      bridgeId: 'hbg_123',
+      relaySecret: 'hrs_123',
+      relayUrl: 'wss://relay.example.com/ws',
+      instanceId: 'hermes-host',
+      displayName: null,
+      createdAt: '2026-04-11T00:00:00.000Z',
+      updatedAt: '2026-04-11T00:00:00.000Z',
+    });
+    writeFileSync(getHermesRelayConfigPath(), '{not-json', 'utf8');
+
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    let read: unknown;
+    let capturedCalls: ReadonlyArray<ReadonlyArray<unknown>> = [];
+    try {
+      read = readHermesRelayConfig();
+    } finally {
+      // mockRestore resets call history, so capture it before restoring.
+      capturedCalls = errorSpy.mock.calls;
+      errorSpy.mockRestore();
+    }
+    expect(read).toBeNull();
+    expect(capturedCalls).toHaveLength(1);
+    const message = String(capturedCalls[0]?.[0] ?? '');
+    expect(message).toContain('unreadable or corrupted');
+    expect(message).not.toContain('hrs_123');
   });
 });
